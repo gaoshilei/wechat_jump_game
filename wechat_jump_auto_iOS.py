@@ -25,27 +25,45 @@ from PIL import Image, ImageDraw
 import wda
 
 
-with open('config.json', 'r') as f:
-    config = json.load(f)
+# with open('config.json', 'r') as f:
+#     config = json.load(f)
 
+# # Magic Number，不设置可能无法正常执行，请根据具体截图从上到下按需设置
+# under_game_score_y = config['under_game_score_y']
+# # 长按的时间系数，请自己根据实际情况调节
+# press_coefficient = config['press_coefficient']
+# # 二分之一的棋子底座高度，可能要调节
+# piece_base_height_1_2 = config['piece_base_height_1_2']
+# # 棋子的宽度，比截图中量到的稍微大一点比较安全，可能要调节
+# piece_body_width = config['piece_body_width']
+# time_coefficient = config['press_coefficient']
 
+# # 模拟按压的起始点坐标，需要自动重复游戏请设置成“再来一局”的坐标
+# swipe = config.get('swipe', {
+#     "x1": 320,
+#     "y1": 410,
+#     "x2": 320,
+#     "y2": 410
+#     })
+
+#====不再读取配置文件，直接写死参数（just for iPhone 6S）======
 # Magic Number，不设置可能无法正常执行，请根据具体截图从上到下按需设置
-under_game_score_y = config['under_game_score_y']
-# 长按的时间系数，请自己根据实际情况调节
-press_coefficient = config['press_coefficient']
-# 二分之一的棋子底座高度，可能要调节
-piece_base_height_1_2 = config['piece_base_height_1_2']
-# 棋子的宽度，比截图中量到的稍微大一点比较安全，可能要调节
-piece_body_width = config['piece_body_width']
-time_coefficient = config['press_coefficient']
+under_game_score_y = 200     # 截图中刚好低于分数显示区域的 Y 坐标，300 是 1920x1080 的值，2K 屏、全面屏请根据实际情况修改
+press_coefficient = 1.95       # 长按的时间系数，请自己根据实际情况调节
+piece_base_height_1_2 = 13   # 二分之一的棋子底座高度，可能要调节
+piece_body_width = 42             # 棋子的宽度，比截图中量到的稍微大一点比较安全，可能要调节
+time_coefficient = 1.95
 
 # 模拟按压的起始点坐标，需要自动重复游戏请设置成“再来一局”的坐标
-swipe = config.get('swipe', {
-    "x1": 320,
-    "y1": 410,
-    "x2": 320,
-    "y2": 410
-    })
+# if config.get('swipe'):
+#     swipe = config['swipe']
+# else:
+swipe = {
+    "x1": random.uniform(100,980),
+    "y1": random.uniform(300,1400),
+    "x2": random.uniform(100,980),
+    "y2": random.uniform(300,1400)
+}
 
 c = wda.Client()
 s = c.session()
@@ -60,9 +78,20 @@ def pull_screenshot():
 
 
 def jump(distance):
-    press_time = distance * time_coefficient / 1000
-    print('press time: {}'.format(press_time))
-    s.tap_hold(200, 200, press_time)
+     # 随机的滑动距离，这样提交时steps字段就不为空 
+    randomX = random.uniform(5, 10)
+    randomY = random.uniform(5, 10) 
+    random_length = (randomX * randomX + randomY * randomY) ** 0.5 
+    print('random length: {}'.format(random_length)) 
+    # 求出动态的跳跃系数 
+    random_time_coefficient = random_length * (-0.011094) + time_coefficient 
+    print('random time coefficient: {}'.format(random_time_coefficient)) 
+    press_time = distance * (random_time_coefficient) / 1000 
+    print('press time: {}'.format(press_time)) 
+    x1 = 218 + random.random() * 10 
+    y1 = 515 + random.random() * 10 
+    # s.tap_hold(x1, y1, press_time) # 改为swipe来操作 
+    s.swipe(x1, y1, x1 - randomX, y1 + randomY, press_time)
 
 
 def backup_screenshot(ts):
@@ -109,6 +138,7 @@ def find_piece_and_board(im):
     print("size: {}, {}".format(w, h))
 
     piece_x_sum = piece_x_c = piece_y_max = 0
+
     board_x = board_y = 0
     scan_x_border = int(w / 8)  # 扫描棋子时的左右边界
     scan_start_y = 0  # 扫描的起始 y 坐标
@@ -149,7 +179,11 @@ def find_piece_and_board(im):
     piece_x = piece_x_sum / piece_x_c
     piece_y = piece_y_max - piece_base_height_1_2  # 上移棋子底盘高度的一半
 
-    for i in range(int(h / 3), int(h * 2 / 3)):
+
+    #modified by wht
+    getBox = 0
+    topPoint = 0
+    for i in range (int (h / 3), int (h * 2 / 3)):
         last_pixel = im_pixel[0, i]
         if board_x or board_y:
             break
@@ -157,27 +191,38 @@ def find_piece_and_board(im):
         board_x_c = 0
 
         for j in range(w):
-            pixel = im_pixel[j, i]
-            # 修掉脑袋比下一个小格子还高的情况的 bug
-            if abs(j - piece_x) < piece_body_width:
-                continue
+                pixel = im_pixel[j, i]
+                # 修掉脑袋比下一个小格子还高的情况的 bug
+                if abs(j - piece_x) < piece_body_width:
+                    continue
 
-            # 修掉圆顶的时候一条线导致的小 bug，这个颜色判断应该 OK，暂时不提出来
-            if abs(pixel[0] - last_pixel[0]) \
-                    + abs(pixel[1] - last_pixel[1]) \
-                    + abs(pixel[2] - last_pixel[2]) > 10:
-                board_x_sum += j
-                board_x_c += 1
+                # 修掉圆顶的时候一条线导致的小 bug，这个颜色判断应该 OK，暂时不提出来
+                if abs(pixel[0] - last_pixel[0]) + abs(pixel[1] - last_pixel[1]) + abs(pixel[2] - last_pixel[2]) > 50:
+                    if getBox:
+                        board_x_sum += j
+                        board_x_c += 1
+                    else: 
+                        getBox = 1
+                        topPoint = i
+                        i += 5
+                        continue
 
         if board_x_sum:
-            board_x = board_x_sum / board_x_c
+            board_x = board_x_sum / board_x_c - 5
 
-    # 按实际的角度来算，找到接近下一个 board 中心的坐标 这里的角度应该
-    # 是 30°,值应该是 tan 30°, math.sqrt(3) / 3
-    board_y = piece_y - abs(board_x - piece_x) * math.sqrt(3) / 3
-
-    if not all((board_x, board_y)):
-        return 0, 0, 0, 0
+    # 添加了有白点的情况判断，如果有白点直接跳跃至白点
+    # iOS很多失败都是因为跳跃点选取有问题。。。。
+    for l in range(topPoint, topPoint + 200):
+        pixel = im_pixel[board_x, l]
+        if abs(pixel[0] - 245) + abs(pixel[1] - 245) + abs(pixel[2] - 245) == 0:
+            board_y = l + 5
+            break
+    # 按实际的角度来算，找到接近下一个 board 中心的坐标 这里的角度应该是30°,值应该是tan 30°, math.sqrt(3) / 3
+    if board_y == 0:
+        board_y = piece_y - abs(board_x - piece_x) * math.sqrt(3) / 3
+        
+    # if not all((board_x, board_y)):
+    #     return 0, 0, 0, 0
 
     return piece_x, piece_y, board_x, board_y
 
@@ -202,7 +247,7 @@ def main():
         save_debug_creenshot(ts, im, piece_x, piece_y, board_x, board_y)
         backup_screenshot(ts)
         # 为了保证截图的时候应落稳了，多延迟一会儿，随机值防 ban
-        time.sleep(random.uniform(1, 1.1))
+        time.sleep(random.uniform(1.5, 1.8))
 
 
 if __name__ == '__main__':
